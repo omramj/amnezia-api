@@ -1,3 +1,5 @@
 settings.json
 setenv.sh
+tmp/
+__pycache__/
 .venv

@@ -1,10 +1,12 @@
 import subprocess
 import json
 
+import docker
+from docker.models.containers import Container, ExecResult
+
 
 class Executor:
     def __init__(self):
-        self.installed_containers = {}
         pass
 
     def _execute_shell_command(self, command: str) -> str:
@@ -36,89 +38,60 @@ class ServerController(Executor):
     def __init__(self):
         self.xray: XrayContainerController
 
+        self.docker_client = docker.from_env()
         self.initialize_container_controllers()
 
 
-    def get_installed_containers(self) -> dict[str, str]:
-
-        command = "docker ps"
-
-        containers_list = self._execute_shell_command(command).split("\n")
-
-        if len(containers_list) < 2:
-            #TODO
-            print("No containers found")
-            raise Exception
-
-        # Remove header and empty tail
-        del containers_list[0]
-        del containers_list[-1]
-        # TODO Am I sure that there always be an empty line at the end??
-
-        # Extract type and id of each container
-        self.installed_containers = {}
-        for container in containers_list:
-
-            lst = container.split()
-            container_id = lst[0]
-            type = lst[1]
-
-            self.installed_containers.update({type: container_id})
-
-        return self.installed_containers
+    def get_installed_containers(self) -> list[Container]:
+        return self.docker_client.containers.list()
 
 
     def initialize_container_controllers(self):
 
-        for type, id in self.get_installed_containers().items():
-            match type:
+        for container in self.get_installed_containers():
+            match container.name:
                 case "amnezia-xray":
-                    self.xray = XrayContainerController(id)
+                    self.xray = XrayContainerController(container)
                 case _:
                     #TODO
                     pass
 
 
 class ContainerController(Executor):
-    def __init__(self):
-        self.container_id = ""
+    def __init__(self, container: Container):
+        self.container = container
 
 
-    def execute_arbitrary_command_in_container(self, command: str) -> str:
+    def restart_container(self) -> None:
+        self.container.restart()
 
-        if self.container_id == "":
-            # TODO
-            raise Exception
+    def execute_arbitrary_command_in_container(self, command: str) -> ExecResult:
 
-        full_command = f"docker exec {self.container_id} {command}"
-        
-        return self._execute_shell_command(full_command)
+        result = self.container.exec_run(f"{command}")
+
+        return result
 
 
     def copy_file_into_container(self, from_path: str, to_path: str) -> str:
         # copy a file from host into container
 
-        if self.container_id == "":
-            # TODO
-            raise Exception
-
-        full_command = f"docker cp {from_path} {self.container_id}://{to_path}"
+        full_command = f"docker cp {from_path} {self.container.id}://{to_path}"
         
         print(full_command)
         return self._execute_shell_command(full_command)
 
 
 class XrayContainerController(ContainerController):
-# amnezia-client/client/configurators/xray_configurator.cpp
+# https://github.com/amnezia-vpn/amnezia-client/blob/dev/client/configurators/xray_configurator.cpp
 
-    def __init__(self, container_id: str) -> None:
-        self.container_id = container_id
+    def __init__(self, container: Container) -> None:
+        self.container = container
 
 
     def get_server_config(self) -> dict:
         command_list = "cat /opt/amnezia/xray/server.json"
         result = self.execute_arbitrary_command_in_container(command_list)
-        return json.loads(result)
+        return json.loads(result.output)
 
 
     def update_server_config(self, new_config: dict) -> str:

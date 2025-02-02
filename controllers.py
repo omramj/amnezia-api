@@ -2,11 +2,32 @@ import subprocess
 
 import docker
 from docker.models.containers import Container, ExecResult
+import utils
 
 
 class Executor:
     def __init__(self):
         pass
+
+
+    def get_server_public_ip(self) -> str:
+        # The way we find out public IP is like in the Outline installer script (function set_hostname()).
+        # https://raw.githubusercontent.com/Jigsaw-Code/outline-server/master/src/server_manager/install_scripts/install_server.sh
+
+        checkers = [
+                "https://icanhazip.com",
+                "https://ipinfo.io/ip"
+                ]
+
+        for url in checkers:
+            ip_string = self._execute_shell_command(f"curl {url}").strip("\n")
+            if utils.validate_ip_address(ip_string):
+                return ip_string
+
+        #TODO logging and exception
+        print("Could not find out server public ip")
+        raise Exception
+
 
     def _execute_shell_command(self, command: str) -> str:
         try:

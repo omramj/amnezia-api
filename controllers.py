@@ -1,6 +1,7 @@
 import json
 import uuid
 import subprocess
+import base64
 
 import docker
 from docker.models.containers import Container, ExecResult
@@ -168,6 +169,13 @@ class Configurator:
         return config
 
 
+    def _convert_string_to_base64(self, string: str) -> str:
+        string_bytes = string.encode()
+        base64_bytes = base64.b64encode(string_bytes)
+        return base64_bytes.decode("ascii")
+
+
+
 class XrayConfigurator(Configurator):
 # https://github.com/amnezia-vpn/amnezia-client/blob/dev/client/configurators/xray.cpp
 
@@ -237,10 +245,9 @@ class XrayConfigurator(Configurator):
                 self._get_client_config_template(),
                 variables)
                 
-        return user_config
+        return f"vpn://{self._convert_string_to_base64(user_config)}"
 
     
     def _get_client_config_template(self) -> str:
         filepath = settings.TEMPLATES_DIR + "xray_client_config_template.json"
         return self._read_text_file(filepath)
-

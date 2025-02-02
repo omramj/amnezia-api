@@ -3,3 +3,4 @@ setenv.sh
 tmp/
 __pycache__/
 .venv
+secret-url-string.txt

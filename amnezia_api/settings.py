@@ -11,7 +11,7 @@ class Settings:
 
     def _read_text_file(self, filepath: str) -> str:
         with open(filepath, "r") as file:
-            return file.read()
+            return file.read().strip("\n")
 
 
 settings = Settings()

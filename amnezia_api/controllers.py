@@ -6,8 +6,8 @@ import base64
 import docker
 from docker.models.containers import Container, ExecResult
 
-import utils
-from settings import settings
+import amnezia_api.utils as utils
+from amnezia_api.settings import settings
 
 
 class Executor:

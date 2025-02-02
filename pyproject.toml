@@ -1,0 +1,12 @@
+[project]
+name = "amnezia-api"
+version = "0.0.9"
+description = "An API backend for AmneziaVPN containers."
+dependencies = [
+    "flask",
+    "docker"
+]
+
+[build-system]
+requires = ["flit_core<4"]
+build-backend = "flit_core.buildapi"

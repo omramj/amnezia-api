@@ -8,6 +8,7 @@ class Settings:
     def __init__(self):
         self.settings_json_path = SETTINGS_JSON_PATH
         self.TEMPLATES_DIR: str
+        self.secret_url_string: str
         self.xray_control_enabled: bool
         self.awg_control_enabled: bool
 
@@ -22,6 +23,15 @@ class Settings:
         general_settings = settings.get("general")
         self._check_if_none(general_settings, "General settings")
 
+        self.TEMPLATES_DIR = settings.get("general").get("templates-directory")
+        self._check_if_none(self.TEMPLATES_DIR, "Templates directory")
+        if not self.TEMPLATES_DIR.endswith("/"):
+            self.TEMPLATES_DIR += "/"
+
+        self.secret_url_string = general_settings.get("secret-url-string")
+        self._check_if_none(self.secret_url_string, "Secret url string")
+
+
         xray_settings = settings.get("xray")
         self._check_if_none(xray_settings, "Xray")
         self.xray_control_enabled = xray_settings.get("enable")
@@ -31,11 +41,6 @@ class Settings:
         self._check_if_none(awg_settings, "Amnezia-wg")
         self.awg_control_enabled = awg_settings.get("enable")
         self._check_if_none(self.awg_control_enabled, "The 'enable' parameter from amnezia-wg")
-
-        self.TEMPLATES_DIR = settings.get("general").get("templates-directory")
-        self._check_if_none(self.TEMPLATES_DIR, "Templates directory")
-        if not self.TEMPLATES_DIR.endswith("/"):
-            self.TEMPLATES_DIR += "/"
 
 
     def _check_if_none(self, thing, field_name: str) -> None:

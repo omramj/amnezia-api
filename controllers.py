@@ -83,6 +83,10 @@ class ContainerController(Executor):
 
     def execute_arbitrary_command_in_container(self, command: str) -> ExecResult:
         result = self.container.exec_run(f"{command}")
+        if result[0] != 0:
+            #TODO logging and exception
+            print(f"Error in exec_run. Command: ""{command}"".")
+            raise Exception
         return result
 
 

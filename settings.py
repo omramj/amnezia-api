@@ -34,6 +34,8 @@ class Settings:
 
         self.TEMPLATES_DIR = settings.get("general").get("templates-directory")
         self._check_if_none(self.TEMPLATES_DIR, "Templates directory")
+        if not self.TEMPLATES_DIR.endswith("/"):
+            self.TEMPLATES_DIR += "/"
 
 
     def _check_if_none(self, thing, field_name: str) -> None:

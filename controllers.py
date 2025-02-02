@@ -124,3 +124,17 @@ class XrayContainerController(ContainerController):
                                                "/opt/amnezia/xray/server.json")
         self._remove_file(filepath)
         return result
+
+
+    def get_server_public_key(self) -> str:
+        command_list = "cat /opt/amnezia/xray/xray_public.key"
+        result = self.execute_arbitrary_command_in_container(command_list)
+        return result[1].decode().replace("\n", "")
+
+
+    def get_server_short_id_key(self) -> str:
+        command_list = "cat /opt/amnezia/xray/xray_short_id.key"
+        result = self.execute_arbitrary_command_in_container(command_list)
+        return result[1].decode().replace("\n", "")
+
+

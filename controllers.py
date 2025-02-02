@@ -226,7 +226,6 @@ class XrayConfigurator(Configurator):
 
 
     def create_user_config(self) -> str:
-        return "Suppose, this is a config"
         client_id = self._prepare_server_config()
         variables = {
                 "$CLIENT_ID": str(client_id),

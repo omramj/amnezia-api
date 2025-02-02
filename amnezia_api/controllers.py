@@ -99,7 +99,6 @@ class ContainerController(Executor):
     def copy_file_into_container(self, from_path: str, to_path: str) -> str:
         # copy a file from host into container
         full_command = f"docker cp {from_path} {self.container.id}://{to_path}"
-        print(full_command)
         return self._execute_shell_command(full_command)
 
 
@@ -115,21 +114,10 @@ class XrayContainerController(ContainerController):
 
 
     def update_server_config(self, new_config: str) -> str:
-        # command = f""" sh -c "echo '{new_config}' > /opt/amnezia/xray/server.json" """
+        command = f""" sh -c 'cat > /opt/amnezia/xray/server.json <<EOF\n{new_config}\nEOF'"""
 
-        # First: save the config to a host.
-        # Second: copy from host to the container. 
-        # Third: delete the file from the host.
-        # This feels stupid, but I right now I can't come up with a way to overcome
-        # quotation problems when using echo.
-        # TODO in the future.
-
-        filepath = "tmp/server.json"
-        self._write_to_file(filepath=filepath, data=new_config)
-        result = self.copy_file_into_container(filepath,
-                                               "/opt/amnezia/xray/server.json")
-        self._remove_file(filepath)
-        return result
+        result = self.execute_arbitrary_command_in_container(command)
+        return result[1]
 
 
     def get_server_public_key(self) -> str:

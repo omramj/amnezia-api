@@ -1,8 +1,7 @@
-from classes import ServerController
+from controllers import ServerController
+from configurators import XrayConfigurator
 
 controller = ServerController()
+xray_configurator = XrayConfigurator(controller.xray_controller)
 
-server_config = controller.xray.get_server_config()
-print(server_config)
-
-# print(controller.xray.update_server_config(server_config))
+print(xray_configurator.create_user_config())

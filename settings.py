@@ -1,44 +1,48 @@
 import json
-from os import wait
-import subprocess
 
 
-def load_wg_server_private_key(container_id: str) -> str:
-    command_list = ['cat', '/opt/amnezia/awg/wireguard_server_private_key.key']
-    return _execute_arbitrary_command_in_container(container_id, command_list)
+SETTINGS_JSON_PATH = "settings.json"
 
 
-def load_wg_server_public_key(container_id: str) -> str:
-    command_list = ['cat', '/opt/amnezia/awg/wireguard_server_public_key.key']
-    return _execute_arbitrary_command_in_container(container_id, command_list)
+class Settings:
+    def __init__(self):
+        self.settings_json_path = SETTINGS_JSON_PATH
+        self.TEMPLATES_DIR: str
+        self.xray_control_enabled: bool
+        self.awg_control_enabled: bool
+
+        self.parse_settings_json()
 
 
-def load_wg_server_preshared_key(container_id: str) -> str:
-    command_list = ['cat', '/opt/amnezia/awg/wireguard_psk.key']
-    return _execute_arbitrary_command_in_container(container_id, command_list)
+    def parse_settings_json(self) -> None:
+
+        with open(self.settings_json_path) as f:
+            settings = json.load(f)
+
+        general_settings = settings.get("general")
+        self._check_if_none(general_settings, "General settings")
+
+        xray_settings = settings.get("xray")
+        self._check_if_none(xray_settings, "Xray")
+        self.xray_control_enabled = xray_settings.get("enable")
+        self._check_if_none(self.xray_control_enabled, "The 'enable' parameter from xray")
+
+        awg_settings = settings.get("amnezia-awg")
+        self._check_if_none(awg_settings, "Amnezia-wg")
+        self.awg_control_enabled = awg_settings.get("enable")
+        self._check_if_none(self.awg_control_enabled, "The 'enable' parameter from amnezia-wg")
+
+        self.TEMPLATES_DIR = settings.get("general").get("templates-directory")
+        self._check_if_none(self.TEMPLATES_DIR, "Templates directory")
 
 
-def _execute_arbitrary_command_in_container(container_id: str, command_list: list[str]) -> str:
-    tokens = ['docker', 'exec', container_id, *command_list]
+    def _check_if_none(self, thing, field_name: str) -> None:
+        if thing is None:
+            # TODO loggingg and exception
+            print(f"{field_name} field not found in settings.json. Check settings.json file structure.")
+            raise Exception
 
-    try:
-        result = subprocess.run(tokens, check=True,
-                                text=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
-        return result.stdout
-
-    except subprocess.CalledProcessError as e:
-        # TODO
-        print(e)
-        exit()
+        return
 
 
-with open('settings.json') as f:
-    settings = json.load(f)
-
-
-DOCKER_CONTAINER_ID = settings.get("amnezia-awg").get("docker-container-id")
-
-WG_SERVER_PRIVATE_KEY = load_wg_server_private_key(DOCKER_CONTAINER_ID).strip('\n')
-WG_SERVER_PUBLIC_KEY = load_wg_server_public_key(DOCKER_CONTAINER_ID).strip('\n')
-WG_SERVER_PSK = load_wg_server_preshared_key(DOCKER_CONTAINER_ID).strip('\n')
+settings = Settings()

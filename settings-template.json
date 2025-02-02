@@ -1,4 +1,15 @@
 {
-    "amnezia-awg": [
-        "docker-container-id": ""
+    "general":
+    {
+        "templates-directory": "templates/",
+        "secret-url-string": ""
+    },
+    "amnezia-awg":
+    {
+        "enable": "true"
+    },
+    "xray":
+    {
+        "enable": "true"
+    }
 }

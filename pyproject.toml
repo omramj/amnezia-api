@@ -1,6 +1,6 @@
 [project]
 name = "amnezia-api"
-version = "0.0.9"
+version = "0.0.1"
 description = "An API backend for AmneziaVPN containers."
 dependencies = [
     "flask",

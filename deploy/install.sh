@@ -54,6 +54,10 @@ function log_start_step() {
   echo -n " "
 }
 
+function command_exists {
+  command -v "$@" &> /dev/null
+}
+
 # Check to see if docker is installed.
 function verify_docker_installed() {
   if command_exists docker; then
@@ -61,6 +65,16 @@ function verify_docker_installed() {
   fi
   log_error "NOT INSTALLED"
   echo "Docker is not installed... Please, set up your server with AmneziaVPN app fist, then try running this script again."
+  exit 1
+}
+
+# Check to see if docker is installed.
+function verify_curl_installed() {
+  if command_exists curl; then
+    return 0
+  fi
+  log_error "NOT INSTALLED"
+  echo "Curl is not installed... Please, isntall curl with 'sudo apt install curl' and then run this script again."
   exit 1
 }
 
@@ -178,7 +192,7 @@ function generate_certificate_fingerprint() {
 }
 
 function download_amnezia_api_wheel_package() {
-  curl --output 
+  curl -o "${AMNEZIAAPI_DIR}/${WHEEL_NAME}" https://github.com/omramj/amnezia-api/blob/dev/dist/${WHEEL_NAME}
 
 }
 
@@ -189,11 +203,8 @@ FROM python:3.13
 
 WORKDIR /opt/amnezia-api/
 
-RUN pip install --no-cache-dir ../dist/amnezia_api-${APP_VERSION}-py2.py3-none-any.whl
+RUN pip install --no-cache-dir ${AMNEZIAAPI_DIR}/${WHEEL_NAME}
 RUN pip install --no-cache-dir gunicorn
-
-COPY ${SECRET_URL_STRING_PATH} .
-COPY ${TEMPLATES_PATH} .
 
 CMD ["gunicorn", "-w", "4", "--bind=0.0.0.0:${API_PORT}","'amnezia_api:create_app()'"]
 EOF
@@ -240,10 +251,10 @@ docker_command=(
   -e "SECRET_URL_STRING=${SECRET_URL_STRING}"
 
   # Location of the API TLS certificate and key.
-  -e "SB_CERTIFICATE_FILE=${API_CERTIFICATE_FILE}"
-  -e "SB_PRIVATE_KEY_FILE=${API_PRIVATE_KEY_FILE}"
+  #-e "API_CERTIFICATE_FILE=${API_CERTIFICATE_FILE}"
+  #-e "API_PRIVATE_KEY_FILE=${API_PRIVATE_KEY_FILE}"
 
-  "${SB_IMAGE}"
+  "${CONTAINER_NAME}"
 )
 "\${docker_command[@]}"
 EOF
@@ -268,9 +279,11 @@ function install_amnezia_api() {
 
   export CONTAINER_NAME="amnezia-api"
   export APP_VERSION="0.0.1"
+  export WHEEL_NAME="amnezia_api-${APP_VERSION}-py2.py3-none-any.whl"
 
   run_step "Verifying that Docker is installed" verify_docker_installed
   run_step "Verifying that Docker daemon is running" verify_docker_running
+  run_step "Verifying that curl is installed" verify_curl_installed
 
   export AMNEZIAAPI_DIR="/opt/amnezia-api}"
   mkdir -p "${AMNEZIAAPI_DIR}"
@@ -305,7 +318,17 @@ function install_amnezia_api() {
   run_step "Donwloading wheel package" download_amnezia_api_wheel_package
   run_step "Building container" build_amnezia_api_container
   run_step "Starting Amnezia-API" start_amnezia_api_container
-}
+
+  cat <<END_OF_SERVER_OUTPUT
+
+CONGRATULATIONS! Your Amnezia-API backend is up and running.
+
+To access the api, use the following link:
+
+http://${PUBLIC_HOSTNAME}:${API_PORT}/${SECRET_URL_STRING}/
+
+END_OF_SERVER_OUTPUT
+} # end of install_amnezia_api
 
 function main()
 {

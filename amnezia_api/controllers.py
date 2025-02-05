@@ -8,6 +8,7 @@ from docker.models.containers import Container, ExecResult
 
 import amnezia_api.utils as utils
 from amnezia_api.settings import settings
+import amnezia_api.config_templates as config_templates
 
 
 class Executor:
@@ -237,5 +238,5 @@ class XrayConfigurator(Configurator):
 
     
     def _get_client_config_template(self) -> str:
-        filepath = settings.TEMPLATES_DIR + "xray_client_config_template.json"
-        return self._read_text_file(filepath)
+        
+        return config_templates.XRAY_CLIENT_TEMPLATE

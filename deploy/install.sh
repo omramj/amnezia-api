@@ -284,7 +284,6 @@ function install_amnezia_api() {
   readonly PUBLIC_HOSTNAME
 
   readonly SECRET_URL_STRING_PATH="${AMNEZIAAPI_DIR}/secret-url-string.txt}"
-  readonly TEMPLATES_PATH="${AMNEZIAAPI_DIR}/templates/"
 
   # If $SECRET_URL_STRING is already populated, make a backup before clearing it.
   if [[ -s "${SECRET_URL_STRING_PATH}" ]]; then

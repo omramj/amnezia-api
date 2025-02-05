@@ -1,10 +1,8 @@
 import os
-import json
 
 
 class Settings:
     def __init__(self):
-        self.TEMPLATES_DIR = "templates/"
         self.secret_url_string = self._load_env_var("SECRET_URL_STRING")
         self.xray_control_enabled = True
         self.awg_control_enabled = True

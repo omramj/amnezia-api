@@ -236,6 +236,9 @@ docker_command=(
   # The state that is persisted across restarts.
   -v "${STATE_DIR}:${STATE_DIR}"
 
+  # Env var for sercet url string
+  -e "SECRET_URL_STRING=${SECRET_URL_STRING}"
+
   # Location of the API TLS certificate and key.
   -e "SB_CERTIFICATE_FILE=${API_CERTIFICATE_FILE}"
   -e "SB_PRIVATE_KEY_FILE=${API_PRIVATE_KEY_FILE}"

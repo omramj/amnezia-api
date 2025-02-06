@@ -188,11 +188,10 @@ function generate_certificate_fingerprint() {
   # Example format: "BDDBC9A4395CB34E6ECF1843619F07A2090737356367"
   local CERT_HEX_FINGERPRINT
   CERT_HEX_FINGERPRINT="$(echo "${CERT_OPENSSL_FINGERPRINT#*=}" | tr -d :)" || return
-  output_config "certSha256:${CERT_HEX_FINGERPRINT}"
 }
 
 function download_amnezia_api_wheel_package() {
-  curl -o "${AMNEZIAAPI_DIR}/${WHEEL_NAME}" https://github.com/omramj/amnezia-api/blob/dev/dist/${WHEEL_NAME}
+  curl -o "${AMNEZIAAPI_DIR}/${WHEEL_NAME}" https://github.com/omramj/amnezia-api/raw/refs/heads/dev/dist/${WHEEL_NAME}
 
 }
 
@@ -201,9 +200,13 @@ function build_amnezia_api_container() {
   cat <<-EOF > "${DOCKERFILE}"
 FROM python:3.13
 
-WORKDIR /opt/amnezia-api/
+WORKDIR ${AMNEZIAAPI_DIR}
 
-RUN pip install --no-cache-dir ${AMNEZIAAPI_DIR}/${WHEEL_NAME}
+ADD ${WHEEL_NAME} ${WHEEL_NAME}
+
+RUN python3 -m venv .venv
+RUN . .venv/bin/activate
+RUN pip install ${WHEEL_NAME}
 RUN pip install --no-cache-dir gunicorn
 
 CMD ["gunicorn", "-w", "4", "--bind=0.0.0.0:${API_PORT}","'amnezia_api:create_app()'"]
@@ -220,7 +223,7 @@ EOF
   STDERR_OUTPUT="$({ "${BUILD_SCRIPT}" >/dev/null; } 2>&1)" && return
   readonly STDERR_OUTPUT
   log_error "${STDERR_OUTPUT}"
-  return 1
+  exit 1
 }
 
 function start_amnezia_api_container() {
@@ -285,7 +288,7 @@ function install_amnezia_api() {
   run_step "Verifying that Docker daemon is running" verify_docker_running
   run_step "Verifying that curl is installed" verify_curl_installed
 
-  export AMNEZIAAPI_DIR="/opt/amnezia-api}"
+  export AMNEZIAAPI_DIR="/opt/amnezia-api"
   mkdir -p "${AMNEZIAAPI_DIR}"
   chmod u+s,ug+rwx,o-rwx "${AMNEZIAAPI_DIR}"
 

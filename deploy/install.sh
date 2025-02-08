@@ -167,6 +167,7 @@ function safe_base64() {
 function generate_secret_url_string() {
   SECRET_URL_STRING="$(head -c 16 /dev/urandom | safe_base64)"
   readonly SECRET_URL_STRING
+  echo ${SECRET_URL_STRING} > ${SECRET_URL_STRING_PATH}
 }
 
 function generate_certificate() {
@@ -365,7 +366,7 @@ function install_amnezia_api() {
   run_step "Setting PUBLIC_HOSTNAME to external IP" set_hostname
   readonly PUBLIC_HOSTNAME
 
-  readonly SECRET_URL_STRING_PATH="${AMNEZIAAPI_DIR}/secret-url-string.txt}"
+  readonly SECRET_URL_STRING_PATH="${AMNEZIAAPI_DIR}/secret-url-string.txt"
 
   # If $SECRET_URL_STRING is already populated, make a backup before clearing it.
   if [[ -s "${SECRET_URL_STRING_PATH}" ]]; then

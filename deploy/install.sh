@@ -164,7 +164,7 @@ function safe_base64() {
   echo -n "${url_safe%%=*}"  # Strip trailing = chars
 }
 
-function generate_secret_key() {
+function generate_secret_url_string() {
   SECRET_URL_STRING="$(head -c 16 /dev/urandom | safe_base64)"
   readonly SECRET_URL_STRING
 }
@@ -192,42 +192,80 @@ function generate_certificate_fingerprint() {
   CERT_HEX_FINGERPRINT="$(echo "${CERT_OPENSSL_FINGERPRINT#*=}" | tr -d :)" || return
 }
 
-function download_amnezia_api_wheel_package() {
-  curl -L -o "${AMNEZIAAPI_DIR}/${WHEEL_NAME}" https://github.com/omramj/amnezia-api/raw/refs/heads/dev/dist/${WHEEL_NAME}
+function build_nginx_container() {
+  readonly NGINX_DIR="${AMNEZIAAPI_DIR}/nginx"
+  mkdir -p "${NGINX_DIR}" 2> /dev/null
+  NGINX_CONFIG="${NGINX_DIR}/nginx.conf"
 
+  cat <<-EOF > "${NGINX_CONFIG}"
+# Source: https://docs.gunicorn.org/en/latest/deploy.html
+worker_processes 1;
+
+user nobody nogroup;
+error_log  /var/log/nginx/error.log warn;
+pid /var/run/nginx.pid;
+
+events {
+  worker_connections 1024; # increase if you have lots of clients
+  accept_mutex off; # set to 'on' if nginx worker_processes > 1
 }
 
-function build_amnezia_api_container() {
-  local -r DOCKERFILE="${AMNEZIAAPI_DIR}/Dockerfile"
-  local WSGI=" from amnezia-api import create_app; create_app()"
-  echo ${WSGI} > ${AMNEZIAAPI_DIR}/wsgi.py
+http {
+  include mime.types;
+  default_type application/octet-stream;
+  access_log /var/log/nginx/access.log combined;
+  sendfile on;
 
-  cat <<-EOF > "${DOCKERFILE}"
+  upstream app_server {
+    server 127.0.0.1:42674 fail_timeout=0;
+  }
 
-FROM python:3.13
+  server {
+    # if no Host match, close the connection to prevent host spoofing
+    listen 42673 default_server;
+    return 444;
+  }
 
-WORKDIR ${AMNEZIAAPI_DIR}
+  server {
+    listen ${API_PORT} deferred;
+    client_max_body_size 4G;
 
-COPY ${WHEEL_NAME} ${WHEEL_NAME}
+    server_name ${PUBLIC_HOSTNAME};
 
-# RUN python3 -m venv .venv
-# RUN . .venv/bin/activate
-RUN pip install ${WHEEL_NAME}
-RUN pip install --no-cache-dir gunicorn
-COPY wsgi.py .
+    keepalive_timeout 5;
 
-CMD ["ls"]
-CMD ["/usr/local/bin/gunicorn", "-w", "4", "--bind=0.0.0.0:${API_PORT}", "'wsgi:create_app()'"]
+    location / {
+      try_files \$uri @proxy_to_app;
+    }
 
+    location @proxy_to_app {
+      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto \$scheme;
+      proxy_set_header Host \$http_host;
+      # we don't want nginx trying to do something clever with
+      # redirects, we set the Host: header above already.
+      proxy_redirect off;
+      proxy_pass http://127.0.0.1:42674;
+    }
+
+  }
+}
 EOF
 
 
-  local -r BUILD_SCRIPT="${AMNEZIAAPI_DIR}/build_container.sh"
+  cat <<-EOF > "${NGINX_DIR}/Dockerfile"
+
+FROM nginx
+COPY ./nginx.conf /etc/nginx/nginx.conf
+
+EOF
+
+  local -r BUILD_SCRIPT="${NGINX_DIR}/build_container.sh"
   cat <<-EOF > "${BUILD_SCRIPT}"
-# This script builds the Amnezia-API container.
-cp ${WHEEL_DIR}/${WHEEL_NAME} ${AMNEZIAAPI_DIR}/${WHEEL_NAME}
-docker build -t ${CONTAINER_NAME} ${AMNEZIAAPI_DIR} --platform="linux/amd64"
+# This script builds nginx reverse proxy for amnezia-api container.
+docker build -t nginx-amnezia-api ${NGINX_DIR}
 EOF
+
   chmod +x "${BUILD_SCRIPT}"
   # Declare then assign. Assigning on declaration messes up the return code.
   local STDERR_OUTPUT
@@ -238,9 +276,29 @@ EOF
   exit 1
 }
 
+function start_nginx_container() {
+  local -r START_SCRIPT="${NGINX_DIR}/start_container.sh"
+  cat <<-EOF > "${START_SCRIPT}"
+
+set -eu
+
+docker stop "nginx-${CONTAINER_NAME}" 2> /dev/null || true
+docker rm -f "nginx-${CONTAINER_NAME}" 2> /dev/null || true
+
+docker run -d -it --rm -p ${API_PORT}:${API_PORT} --name=nginx-${CONTAINER_NAME} nginx-amnezia-api
+EOF
+
+  chmod +x "${START_SCRIPT}"
+  # Declare then assign. Assigning on declaration messes up the return code.
+  local STDERR_OUTPUT
+  STDERR_OUTPUT="$({ "${START_SCRIPT}" >/dev/null; } 2>&1)" && return
+  readonly STDERR_OUTPUT
+  log_error "FAILED"
+  log_error "${STDERR_OUTPUT}"
+  exit 1
+}
+
 function start_amnezia_api_container() {
-  # TODO(fortuna): Write API_PORT to config file,
-  # rather than pass in the environment.
   local -r START_SCRIPT="${STATE_DIR}/start_container.sh"
   cat <<-EOF > "${START_SCRIPT}"
 # This script starts the Amnezia-API container.
@@ -254,22 +312,19 @@ docker_command=(
   docker
   run
   -d
-  --name "${CONTAINER_NAME}" --restart always --net host
+  --name "${CONTAINER_NAME}" --restart always
+  --network container:nginx-${CONTAINER_NAME}
+
+  # Connect to docker API socket
+   -v /var/run/docker.sock:/var/run/docker.sock
 
   # Use log rotation. See https://docs.docker.com/config/containers/logging/configure/.
   --log-driver local
 
-  # The state that is persisted across restarts.
-  -v "${STATE_DIR}:${STATE_DIR}"
-
   # Env var for sercet url string
   -e "SECRET_URL_STRING=${SECRET_URL_STRING}"
 
-  # Location of the API TLS certificate and key.
-  #-e "API_CERTIFICATE_FILE=${API_CERTIFICATE_FILE}"
-  #-e "API_PRIVATE_KEY_FILE=${API_PRIVATE_KEY_FILE}"
-
-  "${CONTAINER_NAME}"
+  "${IMAGE_NAME}"
 )
 "\${docker_command[@]}"
 EOF
@@ -293,8 +348,7 @@ function install_amnezia_api() {
   umask 0007
 
   export CONTAINER_NAME="amnezia-api"
-  export APP_VERSION="0.0.1"
-  export WHEEL_NAME="amnezia_api-${APP_VERSION}-py2.py3-none-any.whl"
+  export IMAGE_NAME="omramj/amnezia-api-dev:0.0.2"
 
   run_step "Verifying that Docker is installed" verify_docker_installed
   run_step "Verifying that Docker daemon is running" verify_docker_running
@@ -322,7 +376,7 @@ function install_amnezia_api() {
   
   # Make a directory for persistent state
   run_step "Creating persistent state dir" create_persisted_state_dir
-  run_step "Generating secret key" generate_secret_key
+  run_step "Generating secret url string" generate_secret_url_string
   run_step "Generating TLS certificate" generate_certificate
   run_step "Generating SHA-256 certificate fingerprint" generate_certificate_fingerprint
 
@@ -330,8 +384,8 @@ function install_amnezia_api() {
   # as the names shadowbox and watchtower will already be in use.  Consider
   # deleting the container in the case of failure (e.g. using a trap, or
   # deleting existing containers on each run).
-  # run_step "Donwloading wheel package" download_amnezia_api_wheel_package
-  run_step "Building container" build_amnezia_api_container
+  run_step "Building nginx container for reverse proxy" build_nginx_container
+  run_step "Starting nginx container" start_nginx_container
   run_step "Starting Amnezia-API" start_amnezia_api_container
 
   cat <<END_OF_SERVER_OUTPUT
@@ -340,7 +394,9 @@ CONGRATULATIONS! Your Amnezia-API backend is up and running.
 
 To access the api, use the following link:
 
-http://${PUBLIC_HOSTNAME}:${API_PORT}/${SECRET_URL_STRING}/
+http://${PUBLIC_HOSTNAME}:${API_PORT}/${SECRET_URL_STRING}/status
+
+Make sure that port ${API_PORT} is open in your firewall.
 
 END_OF_SERVER_OUTPUT
 } # end of install_amnezia_api

@@ -17,6 +17,8 @@ FULL_LOG="$(mktemp -t amnezia-api_logXXXXXXXXXX)"
 LAST_ERROR="$(mktemp -t amnezia-api_last_errorXXXXXXXXXX)"
 readonly FULL_LOG LAST_ERROR
 
+set -e
+
 function log_command() {
   # Direct STDOUT and STDERR to FULL_LOG, and forward STDOUT.
   # The most recent STDERR output will also be stored in LAST_ERROR.
@@ -191,37 +193,47 @@ function generate_certificate_fingerprint() {
 }
 
 function download_amnezia_api_wheel_package() {
-  curl -o "${AMNEZIAAPI_DIR}/${WHEEL_NAME}" https://github.com/omramj/amnezia-api/raw/refs/heads/dev/dist/${WHEEL_NAME}
+  curl -L -o "${AMNEZIAAPI_DIR}/${WHEEL_NAME}" https://github.com/omramj/amnezia-api/raw/refs/heads/dev/dist/${WHEEL_NAME}
 
 }
 
 function build_amnezia_api_container() {
   local -r DOCKERFILE="${AMNEZIAAPI_DIR}/Dockerfile"
+  local WSGI=" from amnezia-api import create_app; create_app()"
+  echo ${WSGI} > ${AMNEZIAAPI_DIR}/wsgi.py
+
   cat <<-EOF > "${DOCKERFILE}"
+
 FROM python:3.13
 
 WORKDIR ${AMNEZIAAPI_DIR}
 
-ADD ${WHEEL_NAME} ${WHEEL_NAME}
+COPY ${WHEEL_NAME} ${WHEEL_NAME}
 
-RUN python3 -m venv .venv
-RUN . .venv/bin/activate
+# RUN python3 -m venv .venv
+# RUN . .venv/bin/activate
 RUN pip install ${WHEEL_NAME}
 RUN pip install --no-cache-dir gunicorn
+COPY wsgi.py .
 
-CMD ["gunicorn", "-w", "4", "--bind=0.0.0.0:${API_PORT}","'amnezia_api:create_app()'"]
+CMD ["ls"]
+CMD ["/usr/local/bin/gunicorn", "-w", "4", "--bind=0.0.0.0:${API_PORT}", "'wsgi:create_app()'"]
+
 EOF
+
 
   local -r BUILD_SCRIPT="${AMNEZIAAPI_DIR}/build_container.sh"
   cat <<-EOF > "${BUILD_SCRIPT}"
 # This script builds the Amnezia-API container.
-docker build -t ${CONTAINER_NAME} ${AMNEZIAAPI_DIR}
+cp ${WHEEL_DIR}/${WHEEL_NAME} ${AMNEZIAAPI_DIR}/${WHEEL_NAME}
+docker build -t ${CONTAINER_NAME} ${AMNEZIAAPI_DIR} --platform="linux/amd64"
 EOF
   chmod +x "${BUILD_SCRIPT}"
   # Declare then assign. Assigning on declaration messes up the return code.
   local STDERR_OUTPUT
   STDERR_OUTPUT="$({ "${BUILD_SCRIPT}" >/dev/null; } 2>&1)" && return
   readonly STDERR_OUTPUT
+  log_error "FAILED"
   log_error "${STDERR_OUTPUT}"
   exit 1
 }
@@ -318,7 +330,7 @@ function install_amnezia_api() {
   # as the names shadowbox and watchtower will already be in use.  Consider
   # deleting the container in the case of failure (e.g. using a trap, or
   # deleting existing containers on each run).
-  run_step "Donwloading wheel package" download_amnezia_api_wheel_package
+  # run_step "Donwloading wheel package" download_amnezia_api_wheel_package
   run_step "Building container" build_amnezia_api_container
   run_step "Starting Amnezia-API" start_amnezia_api_container
 
@@ -335,6 +347,7 @@ END_OF_SERVER_OUTPUT
 
 function main()
 {
+  
   install_amnezia_api
 }
 

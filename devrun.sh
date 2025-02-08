@@ -2,6 +2,7 @@
 
 # This script will build and run nginx reverse proxy container and the amnezia-api container. 
 # This script is intended only for development. Production-ready install script to be written in future.
+# If you need only to build amnezia-api container without running it, pass --build <image-name>
 set -e
 
 readonly HOSTNAME="91.246.41.209"
@@ -88,12 +89,12 @@ EOF
 
 function build_nginx_container() {
 
-docker build -t nginx-amnezia-api-test ${AMNEZIAAPI_DIR}/nginx
+docker build -t nginx-${AMNEZIAAPI_IMAGE_NAME} ${AMNEZIAAPI_DIR}/nginx
     return 
 }
 
 function run_nginx_container() {
-docker run -d -it --rm -p 42673:42673 --name=nginx-amnezia-api-test nginx-amnezia-api-test
+docker run -d -it --rm -p 42673:42673 --name=nginx-${AMNEZIAAPI_IMAGE_NAME} nginx-${AMNEZIAAPI_IMAGE_NAME}
     return 
 }
 
@@ -105,7 +106,6 @@ FROM python:3.13
 
 WORKDIR /opt/amnezia_api
 
-ENV SECRET_URL_STRING="dev"
 RUN pip install --no-cache-dir flask
 RUN pip install --no-cache-dir docker
 RUN pip install --no-cache-dir gunicorn
@@ -120,17 +120,19 @@ EOF
 
 function build_amnezia_api() {
 
-    docker build -t amnezia-api-test "${AMNEZIAAPI_DIR}"
+    create_amnezia_api_dockerfile
+
+    docker build -t ${AMNEZIAAPI_IMAGE_NAME} "${AMNEZIAAPI_DIR}"
     return 
 }
 
 function run_amnezia_api() {
-    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock --network container:nginx-amnezia-api-test --name=amnezia-api-test amnezia-api-test
+    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock --network container:nginx-${AMNEZIAAPI_IMAGE_NAME} -e SECRET_URL_STRING="dev" --name=${AMNEZIAAPI_IMAGE_NAME} ${AMNEZIAAPI_IMAGE_NAME}
     return 
 }
 
 function cleanup() {
-docker stop nginx-amnezia-api-test
+docker stop nginx-${AMNEZIAAPI_IMAGE_NAME}
 remove_temp_amnezia_api_dir
 }
 
@@ -138,20 +140,41 @@ function remove_temp_amnezia_api_dir() {
 rm -rf "${AMNEZIAAPI_DIR}"
 }
 
+function parse_flags() {
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      -b|--build)
+        AMNEZIAAPI_IMAGE_NAME="$2"
+        BUILD_ONLY=true
+        shift
+        shift
+    esac
+  done
+
+}
+
 function main() {
 
     trap cleanup SIGINT
     trap remove_temp_amnezia_api_dir EXIT
+    AMNEZIAAPI_IMAGE_NAME="amnezia-api-dev"
+    BUILD_ONLY=false
+
+    parse_flags "$@"
+    if [ "$BUILD_ONLY" = "true" ]
+    then 
+      build_amnezia_api
+      exit 0
+    fi
+
     create_nginx_config
     create_nginx_dockerfile
     build_nginx_container
     run_nginx_container
 
-    create_amnezia_api_dockerfile
     build_amnezia_api
     run_amnezia_api
 
 }
-
-main
+main "$@"
 

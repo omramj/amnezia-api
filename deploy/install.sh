@@ -199,8 +199,11 @@ function build_nginx_container() {
   NGINX_CONFIG="${NGINX_DIR}/nginx.conf"
 
   cat <<-EOF > "${NGINX_CONFIG}"
-# Source: https://docs.gunicorn.org/en/latest/deploy.html
-worker_processes 1;
+# Sources:
+# https://docs.gunicorn.org/en/latest/deploy.html
+# https://nginx.org/en/docs/http/configuring_https_servers.html
+
+worker_processes auto;
 
 user nobody nogroup;
 error_log  /var/log/nginx/error.log warn;
@@ -223,17 +226,21 @@ http {
 
   server {
     # if no Host match, close the connection to prevent host spoofing
-    listen 42673 default_server;
+    listen ${API_PORT} default_server;
+    ssl_certificate      "${STATE_DIR}/amnezia-api-selfsigned.crt";
+    ssl_certificate_key  "${STATE_DIR}/amnezia-api-selfsigned.key";
     return 444;
   }
 
   server {
-    listen ${API_PORT} deferred;
+    listen ${API_PORT} deferred ssl;
+    ssl_certificate      "${STATE_DIR}/amnezia-api-selfsigned.crt";
+    ssl_certificate_key  "${STATE_DIR}/amnezia-api-selfsigned.key";
     client_max_body_size 4G;
 
     server_name ${PUBLIC_HOSTNAME};
 
-    keepalive_timeout 5;
+    keepalive_timeout 70;
 
     location / {
       try_files \$uri @proxy_to_app;
@@ -286,7 +293,17 @@ set -eu
 docker stop "nginx-${CONTAINER_NAME}" 2> /dev/null || true
 docker rm -f "nginx-${CONTAINER_NAME}" 2> /dev/null || true
 
-docker run -d -it --rm -p ${API_PORT}:${API_PORT} --name=nginx-${CONTAINER_NAME} nginx-amnezia-api
+docker_command=(
+docker
+run -d
+ -it 
+ --restart always
+-p ${API_PORT}:${API_PORT}
+-v "${STATE_DIR}":"${STATE_DIR}"
+--name=nginx-${CONTAINER_NAME}
+nginx-amnezia-api
+)
+"\${docker_command[@]}"
 EOF
 
   chmod +x "${START_SCRIPT}"
@@ -395,7 +412,7 @@ CONGRATULATIONS! Your Amnezia-API backend is up and running.
 
 To access the api, use the following link:
 
-http://${PUBLIC_HOSTNAME}:${API_PORT}/${SECRET_URL_STRING}/status
+https://${PUBLIC_HOSTNAME}:${API_PORT}/${SECRET_URL_STRING}/status
 
 Make sure that port ${API_PORT} is open in your firewall.
 

@@ -5,7 +5,7 @@
 # If you need only to build amnezia-api container without running it, pass --build <image-name>
 set -e
 
-readonly HOSTNAME="91.246.41.209"
+readonly HOSTNAME=${HOSTNAME}
 readonly AMNEZIAAPI_DIR="./.amnezia-api-dev"
 readonly NGINX_DIR="${AMNEZIAAPI_DIR}/nginx"
 

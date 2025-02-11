@@ -1,4 +1,4 @@
-
+# https://github.com/amnezia-vpn/amnezia-client/blob/dev/client/server_scripts/xray/template.json
 XRAY_CLIENT_TEMPLATE = """
 {
     "inbounds": [
@@ -46,4 +46,27 @@ XRAY_CLIENT_TEMPLATE = """
         }
     ]
 }
+"""
+
+
+WIREGUARD_SERVER_PEER_TEMPLATE = """
+[Peer]
+PublicKey = $CLIENT_PUBKEY
+PresharedKey = $PRESHARED_KEY
+AllowedIPs = $PEER_IP/32
+"""
+
+# https://github.com/amnezia-vpn/amnezia-client/blob/dev/client/server_scripts/wireguard/template.conf
+WIREGUARD_CLIENT_CONFIG_TEMPLATE = """
+[Interface]
+Address = $WIREGUARD_CLIENT_IP/32
+DNS = $PRIMARY_DNS, $SECONDARY_DNS
+PrivateKey = $WIREGUARD_CLIENT_PRIVATE_KEY
+
+[Peer]
+PublicKey = $WIREGUARD_SERVER_PUBLIC_KEY
+PresharedKey = $WIREGUARD_PSK
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = $SERVER_IP_ADDRESS:$WIREGUARD_SERVER_PORT
+PersistentKeepalive = 25
 """

@@ -139,7 +139,7 @@ class Configurator:
 
         for line in self.server_config.splitlines():
             for string in strings_to_search:
-                if string in line:
+                if line.strip().startswith(string):
                     out.append(line)
         return out
 

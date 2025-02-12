@@ -10,6 +10,7 @@ from docker.models.containers import Container, ExecResult
 import amnezia_api.utils as utils
 from amnezia_api.settings import settings
 from amnezia_api.config_templates import (
+        AMNEZIA_WG_CLIENT_CONFIG_TEMPLATE,
         XRAY_CLIENT_TEMPLATE,
         WIREGUARD_SERVER_PEER_TEMPLATE,
         WIREGUARD_CLIENT_CONFIG_TEMPLATE
@@ -69,7 +70,7 @@ class ServerController(Executor):
     def __init__(self):
         self.xray: XrayConfigurator | None = None
         self.wireguard: WgConfigurator | None = None
-        self.amnezia_wg: None
+        self.amnezia_wg: AmneziaWgConfigurator | None = None
 
         self.docker_client = docker.from_env()
         self.initialize_container_controllers()
@@ -89,7 +90,7 @@ class ServerController(Executor):
                     self.wireguard = WgConfigurator(WgContainerController(container))
 
                 case ContainerName.AMNEZIA_WG:
-                    pass
+                    self.amnezia_wg = AmneziaWgConfigurator(AmneziaWgContainerController(container))
 
                 case _:
                     #TODO
@@ -108,37 +109,39 @@ class Configurator:
             return file.read()
 
 
-    def _replace_variables_in_config(self, template: str, variables_values: dict[str, str]) -> str:
+    def _replace_variables_in_config(self, template: str, variables_values: dict) -> str:
 
         config = template
 
         for var, value in variables_values.items():
             if config.find(var) == -1:
                 # TODO logging and exception
-                print(f"The variable {var} not found in the template.")
-                raise Exception
+                raise Exception(f"The variable {var} not found in the template.")
+
+            if value is None:
+                # TODO
+                raise Exception(f"Value of variable {var} is None.")
 
             config = config.replace(var, value)
 
         return config
 
 
-    def _get_lines_from_config(self, string_to_search: str) -> list[str]:
+    def _get_lines_from_config(self, strings_to_search: list[str]) -> list[str]:
         out = []
+        if len(strings_to_search) < 1:
+            #TODO
+            raise Exception("strings_to_search should contain at least one entry")
+
         if self.server_config is None:
             #TODO
-            raise Exception
+            raise Exception("Something went wrong when reading server config.")
 
         for line in self.server_config.splitlines():
-            if string_to_search in line:
-                out.append(line)
+            for string in strings_to_search:
+                if string in line:
+                    out.append(line)
         return out
-
-
-    def _convert_string_to_base64(self, string: str) -> str:
-        string_bytes = string.encode()
-        base64_bytes = base64.b64encode(string_bytes)
-        return base64_bytes.decode("ascii")
 
 
     def add_entry_to_clients_table(self, client_id: str, client_name: str) -> None:
@@ -197,8 +200,9 @@ class ContainerController(Executor):
         return result[1]
 
 
-    def update_server_config(self, new_config: str):
-        pass
+    def update_server_config(self, new_config: str) -> None:
+        #TODO
+        raise Exception("This method should be overriden in the child class.")
 
 
     def get_server_config(self) -> str:
@@ -221,6 +225,7 @@ class XrayContainerController(ContainerController):
         return super().get_text_file_from_container(filepath=filepath)
 
 
+    @override
     def update_server_config(self, new_config: str) -> None:
         config_path = f"{self.working_dir}/server.json"
         super().write_string_to_file(filepath=config_path,
@@ -311,7 +316,7 @@ class XrayConfigurator(Configurator):
                 }
         user_config = self._replace_variables_in_config(
                 self._get_client_config_template(),
-                variables)
+                variables).strip()
 
         # Seems like xray container does not have clientsTable at this point, 
         # so I comment out this method.
@@ -319,7 +324,7 @@ class XrayConfigurator(Configurator):
         # self.add_entry_to_clients_table(client_id=str(client_id),
         #                                 client_name=client_name)
                 
-        return f"vpn://{self._convert_string_to_base64(user_config)}"
+        return user_config
 
 
     def _update_server_config(self, new_server_config: str) -> None:
@@ -353,6 +358,7 @@ class WgContainerController(ContainerController):
         return super().get_text_file_from_container(filepath=filepath)
 
 
+    @override
     def update_server_config(self, new_config: str) -> None:
         config_path = f"{self.working_dir}/wg0.conf"
         super().write_string_to_file(filepath=config_path,
@@ -366,7 +372,6 @@ class WgContainerController(ContainerController):
 
 
 class WgConfigurator(Configurator):
-    # https://github.com/amnezia-vpn/amnezia-client/blob/dev/client/configurators/awg_configurator.cpp
     # https://github.com/amnezia-vpn/amnezia-client/blob/dev/client/configurators/wireguard_configurator.cpp
 
     def __init__(self, controller: WgContainerController):
@@ -383,11 +388,11 @@ class WgConfigurator(Configurator):
         user_config = self._compose_new_user_config(client_ip, private_key)
         self.add_entry_to_clients_table(client_id=public_key, client_name=client_name)
 
-        return f"vpn://{self._convert_string_to_base64(user_config)}"
+        return user_config
 
 
     def _get_port_from_server_config(self) -> int:
-        listen_port_line = self._get_lines_from_config("ListenPort")
+        listen_port_line = self._get_lines_from_config(["ListenPort"])
 
         if listen_port_line is None:
             #TODO
@@ -403,7 +408,7 @@ class WgConfigurator(Configurator):
 
 
     def _get_subnet_ip_from_server_config(self) -> str:
-        address_lines = self._get_lines_from_config("Address")
+        address_lines = self._get_lines_from_config(["Address"])
         if address_lines is None or len(address_lines) < 1:
             #TODO
             raise Exception("Could not find server address ip in the server's config file")
@@ -486,12 +491,12 @@ class WgConfigurator(Configurator):
                     "$WIREGUARD_SERVER_PORT": str(self.listen_port)
                     }
                 )
-        return user_config
+        return user_config.strip()
 
 
     def _get_existed_client_ips_from_server_config(self) -> list[str | None]:
         out = []
-        allowed_ips_lines = self._get_lines_from_config("AllowedIPs")
+        allowed_ips_lines = self._get_lines_from_config(["AllowedIPs"])
         if len(allowed_ips_lines) == 0:
             return []
 
@@ -513,6 +518,76 @@ class WgConfigurator(Configurator):
                 
         return out
 
+
+class AmneziaWgContainerController(WgContainerController):
+    def __init__(self, container: Container):
+        self.container = container
+        self.working_dir = "/opt/amnezia/awg"
+
+
+class AmneziaWgConfigurator(WgConfigurator):
+    # https://github.com/amnezia-vpn/amnezia-client/blob/dev/client/configurators/awg_configurator.cpp
+
+    def __init__(self, controller: AmneziaWgContainerController):
+        super().__init__(controller)
+        self.awg_params: dict[str, str] = self._read_awg_params_from_server_config()
+        pass
+
+
+    @override
+    def _compose_new_user_config(self, client_ip: str, private_key) -> str:
+        template = AMNEZIA_WG_CLIENT_CONFIG_TEMPLATE
+        user_config = self._replace_variables_in_config(
+                template=template,
+                variables_values={
+                    "$WIREGUARD_CLIENT_IP": client_ip,
+                    #TODO: do not hard code DNS
+                    "$PRIMARY_DNS": "1.1.1.1",
+                    "$SECONDARY_DNS": "1.0.0.1",
+                    "$JUNK_PACKET_COUNT": self.awg_params.get("Jc"),
+                    "$JUNK_PACKET_MIN_SIZE": self.awg_params.get("Jmin"),
+                    "$JUNK_PACKET_MAX_SIZE": self.awg_params.get("Jmax"),
+                    "$INIT_PACKET_JUNK_SIZE": self.awg_params.get("S1"),
+                    "$RESPONSE_PACKET_JUNK_SIZE": self.awg_params.get("S2"),
+                    "$INIT_PACKET_MAGIC_HEADER": self.awg_params.get("H1"),
+                    "$RESPONSE_PACKET_MAGIC_HEADER": self.awg_params.get("H2"),
+                    "$UNDERLOAD_PACKET_MAGIC_HEADER": self.awg_params.get("H3"),
+                    "$TRANSPORT_PACKET_MAGIC_HEADER": self.awg_params.get("H4"),
+                    "$WIREGUARD_CLIENT_PRIVATE_KEY": private_key,
+                    "$WIREGUARD_SERVER_PUBLIC_KEY": self.server_public_key,
+                    "$WIREGUARD_PSK": self.server_psk,
+                    "$SERVER_IP_ADDRESS": self.hostname,
+                    "$AWG_SERVER_PORT": str(self.listen_port)
+                    }
+                )
+        return user_config.strip()
+
+
+    def _read_awg_params_from_server_config(self) -> dict[str, str]:
+        params = {}
+        strings_to_search = ["Jc", "Jmin", "Jmax", "S1", "S2",
+                             "H1", "H2", "H3", "H4"]
+
+        for line in self._get_lines_from_config(strings_to_search):
+            key, value = (i.strip() for i in line.split("="))
+
+            # check that value is a number. If not, python throw an exception.
+            # TODO do not make it that stupidly
+            int(value)
+
+            params[key] = value
+
+        if len(params) != len(strings_to_search):
+            # TODO
+            raise Exception("Something went wrong when reading awg parameters from server config. Number of parameters does not match.")
+
+        for key in strings_to_search:
+            if params[key] == None:
+                # TODO
+                raise Exception(f"Something went wrong when reading awg parameters from server config. Key {key} not found.")
+
+        return params
+        
 
 if __name__ == "__main__":
     server = ServerController()

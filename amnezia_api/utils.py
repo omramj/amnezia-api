@@ -2,6 +2,7 @@ import datetime
 from enum import Enum
 import re
 import codecs
+import base64
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
@@ -37,6 +38,14 @@ def validate_ip_address(ip: str) -> bool:
 
 def get_current_datetime() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def convert_string_to_base64_vpn_link(string: str) -> str:
+    string_bytes = string.encode()
+    base64_bytes = base64.b64encode(string_bytes)
+    return "vpn://" + base64_bytes.decode("ascii")
+
+
 
 
 class ContainerName(str, Enum):

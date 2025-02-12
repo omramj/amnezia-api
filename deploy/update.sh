@@ -11,7 +11,7 @@ FULL_LOG="$(mktemp -t amnezia-api_update_logXXXXXXXXXX)"
 LAST_ERROR="$(mktemp -t amnezia-api_update_last_errorXXXXXXXXXX)"
 
 export CONTAINER_NAME="amnezia-api"
-export IMAGE_NAME="omramj/amnezia-api-dev:0.1.0"
+export IMAGE_NAME="omramj/amnezia-api-dev:0.1.1"
 
 
 readonly FULL_LOG LAST_ERROR
@@ -137,7 +137,6 @@ function update_amnezia_api() {
 
   readonly SECRET_URL_STRING_PATH="${AMNEZIAAPI_DIR}/secret-url-string.txt"
   readonly SECRET_URL_STRING="$(cat ${SECRET_URL_STRING_PATH})"
-  echo $SECRET_URL_STRING
 
   run_step "Updating Amnezia-API" start_amnezia_api_container
 

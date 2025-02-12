@@ -17,6 +17,9 @@ FULL_LOG="$(mktemp -t amnezia-api_logXXXXXXXXXX)"
 LAST_ERROR="$(mktemp -t amnezia-api_last_errorXXXXXXXXXX)"
 readonly FULL_LOG LAST_ERROR
 
+export CONTAINER_NAME="amnezia-api"
+export IMAGE_NAME="omramj/amnezia-api-dev:0.1.1"
+
 set -e
 
 function log_command() {
@@ -364,9 +367,6 @@ EOF
 function install_amnezia_api() {
 
   umask 0007
-
-  export CONTAINER_NAME="amnezia-api"
-  export IMAGE_NAME="omramj/amnezia-api-dev:0.1.0"
 
   run_step "Verifying that Docker is installed" verify_docker_installed
   run_step "Verifying that Docker daemon is running" verify_docker_running

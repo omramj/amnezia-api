@@ -366,7 +366,7 @@ function install_amnezia_api() {
   umask 0007
 
   export CONTAINER_NAME="amnezia-api"
-  export IMAGE_NAME="omramj/amnezia-api-dev:0.0.2"
+  export IMAGE_NAME="omramj/amnezia-api-dev:0.1.0"
 
   run_step "Verifying that Docker is installed" verify_docker_installed
   run_step "Verifying that Docker daemon is running" verify_docker_running

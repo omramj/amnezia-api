@@ -109,11 +109,12 @@ WORKDIR /opt/amnezia_api
 RUN pip install --no-cache-dir flask
 RUN pip install --no-cache-dir docker
 RUN pip install --no-cache-dir gunicorn
+RUN pip install --no-cache-dir cryptography
 
 COPY ./amnezia_api ./amnezia_api
 COPY wsgi.py .
 
-CMD ["gunicorn", "-w", "4", "-b", "127.0.0.1:42674", "wsgi:app"]
+CMD ["gunicorn", "-w", "1", "-b", "127.0.0.1:42674", "wsgi:app"]
 EOF
     return 
 }

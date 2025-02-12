@@ -86,7 +86,6 @@ class ServerController(Executor):
                     self.xray = XrayConfigurator(XrayContainerController(container))
 
                 case ContainerName.WIREGUARD:
-                    print("here")
                     self.wireguard = WgConfigurator(WgContainerController(container))
 
                 case ContainerName.AMNEZIA_WG:
@@ -229,21 +228,24 @@ class XrayContainerController(ContainerController):
 
 
     def get_server_public_key(self) -> str:
-        filepath = "{self.working_dir}/xray_public.key"
+        filepath = f"{self.working_dir}/xray_public.key"
         return super().get_text_file_from_container(filepath=filepath)
 
 
     def get_server_short_id_key(self) -> str:
-        filepath = "{self.working_dir}/xray_short_id.key"
+        filepath = f"{self.working_dir}/xray_short_id.key"
         return super().get_text_file_from_container(filepath=filepath)
 
 
 class XrayConfigurator(Configurator):
 # https://github.com/amnezia-vpn/amnezia-client/blob/dev/client/configurators/xray.cpp
 
-    def __init__(self, container: XrayContainerController):
-        self.container = container
-        pass
+    def __init__(self, controller: XrayContainerController):
+        self.controller = controller
+        self.server_config = self.controller.get_server_config()
+        self.server_public_key = self.controller.get_server_public_key()
+        self.server_public_ip = self.controller.get_server_public_ip()
+        self.server_short_id = self.controller.get_server_short_id_key()
 
 
     def _prepare_server_config(self) -> uuid.UUID:
@@ -253,7 +255,11 @@ class XrayConfigurator(Configurator):
 
         # Validate server config structure
 
-        server_config_dict = json.loads(self.container.get_server_config())
+        if self.server_config is None:
+            #TODO
+            raise Exception("Could not read server config.")
+
+        server_config_dict = json.loads(self.server_config)
 
         inbounds = server_config_dict.get("inbounds")
 
@@ -287,10 +293,10 @@ class XrayConfigurator(Configurator):
         new_server_config = json.dumps(server_config_dict, indent=4)
 
         # Load the new config into the container
-        self.container.update_server_config(new_server_config)
+        self._update_server_config(new_server_config)
 
         # Restart container
-        self.container.restart_container()
+        self.controller.restart_container()
 
         return client_id
 
@@ -299,17 +305,26 @@ class XrayConfigurator(Configurator):
         client_id = self._prepare_server_config()
         variables = {
                 "$CLIENT_ID": str(client_id),
-                "$SERVER_PUBLIC_KEY": self.container.get_server_public_key(),
-                "$SERVER_IP": self.container.get_server_public_ip(),
-                "$SHORT_ID": self.container.get_server_short_id_key()
+                "$SERVER_PUBLIC_KEY": self.server_public_key,
+                "$SERVER_IP": self.server_public_ip,
+                "$SHORT_ID": self.server_short_id
                 }
         user_config = self._replace_variables_in_config(
                 self._get_client_config_template(),
                 variables)
-        self.add_entry_to_clients_table(client_id=str(client_id),
-                                        client_name=client_name)
+
+        # Seems like xray container does not have clientsTable at this point, 
+        # so I comment out this method.
+
+        # self.add_entry_to_clients_table(client_id=str(client_id),
+        #                                 client_name=client_name)
                 
         return f"vpn://{self._convert_string_to_base64(user_config)}"
+
+
+    def _update_server_config(self, new_server_config: str) -> None:
+        self.controller.update_server_config(new_server_config)
+        self.server_config = self.controller.get_server_config()
 
     
     def _get_client_config_template(self) -> str:
@@ -368,7 +383,7 @@ class WgConfigurator(Configurator):
         user_config = self._compose_new_user_config(client_ip, private_key)
         self.add_entry_to_clients_table(client_id=public_key, client_name=client_name)
 
-        return user_config
+        return f"vpn://{self._convert_string_to_base64(user_config)}"
 
 
     def _get_port_from_server_config(self) -> int:

@@ -1,7 +1,8 @@
+from __future__ import annotations
+import logging
 import json
 import uuid
 import subprocess
-import base64
 from typing import override
 
 import docker
@@ -16,45 +17,20 @@ from amnezia_api.config_templates import (
         WIREGUARD_CLIENT_CONFIG_TEMPLATE
         )
 import amnezia_api.utils as utils
-from amnezia_api.utils import ContainerName
+from amnezia_api.utils import ServerControllerInitializationError, remove_line_breaks as _
+from amnezia_api.utils import (
+        AddressPoolError, ClientsTableError, ConfigReadingError, ContainerName,
+        ExecRunError, UserConfigError, ServerConfigError
+        )
+
+
+logger = logging.getLogger("controller")
+print(logger)
 
 
 class Executor:
     def __init__(self):
         pass
-
-
-    def get_server_public_ip(self) -> str:
-        # The way we find out public IP is like in the Outline installer script
-        # (function set_hostname()).
-        # https://raw.githubusercontent.com/Jigsaw-Code/outline-server/master/src/server_manager/install_scripts/install_server.sh
-
-        checkers = [
-                "https://icanhazip.com",
-                "https://ipinfo.io/ip"
-                ]
-
-        for url in checkers:
-            ip_string = self._execute_shell_command(f"curl {url}").strip("\n")
-            if utils.validate_ip_address(ip_string):
-                return ip_string
-
-        #TODO logging and exception
-        print("Could not find out server public ip")
-        raise Exception
-
-
-    def _execute_shell_command(self, command: str) -> str:
-        try:
-            result = subprocess.run(command, check=True,
-                                    text=True, shell=True, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE)
-            return result.stdout
-
-        except subprocess.CalledProcessError as e:
-            # TODO
-            print(e)
-            exit()
 
 
     def _write_to_file(self, filepath: str, data: str) -> None:
@@ -67,100 +43,40 @@ class Executor:
 
 
 class ServerController(Executor):
-    def __init__(self):
-        self.xray: XrayConfigurator | None = None
-        self.wireguard: WgConfigurator | None = None
-        self.amnezia_wg: AmneziaWgConfigurator | None = None
+    def __init__(self, container_name: ContainerName):
+        self.configurator: Configurator
 
         self.docker_client = docker.from_env()
-        self.initialize_container_controllers()
+        self._initialize_configurator(container_name)
 
 
     def get_installed_containers(self) -> list[Container]:
         return self.docker_client.containers.list()
 
 
-    def initialize_container_controllers(self):
+    def _initialize_configurator(self, container_name: ContainerName):
         for container in self.get_installed_containers():
-            match container.name:
-                case ContainerName.XRAY:
-                    self.xray = XrayConfigurator(XrayContainerController(container))
+            if container.name == container_name:
+                match container.name:
+                    case ContainerName.XRAY:
+                        self.configurator = XrayConfigurator(
+                                XrayContainerController(container))
 
-                case ContainerName.WIREGUARD:
-                    self.wireguard = WgConfigurator(WgContainerController(container))
+                    case ContainerName.WIREGUARD:
+                        self.configurator = WgConfigurator(
+                                WgContainerController(container))
 
-                case ContainerName.AMNEZIA_WG:
-                    self.amnezia_wg = AmneziaWgConfigurator(AmneziaWgContainerController(container))
+                    case ContainerName.AMNEZIA_WG:
+                        self.configurator = AmneziaWgConfigurator(
+                                AmneziaWgContainerController(container))
 
-                case _:
-                    #TODO
-                    pass
+                    case _:
+                        pass
+                return 
 
-
-class Configurator:
-    def __init__(self):
-        self.server_config: str | None
-        self.controller: ContainerController
-        pass
-
-    
-    def _read_text_file(self, filepath: str) -> str:
-        with open(filepath, "r") as file:
-            return file.read()
-
-
-    def _replace_variables_in_config(self, template: str, variables_values: dict) -> str:
-
-        config = template
-
-        for var, value in variables_values.items():
-            if config.find(var) == -1:
-                # TODO logging and exception
-                raise Exception(f"The variable {var} not found in the template.")
-
-            if value is None:
-                # TODO
-                raise Exception(f"Value of variable {var} is None.")
-
-            config = config.replace(var, value)
-
-        return config
-
-
-    def _get_lines_from_config(self, strings_to_search: list[str]) -> list[str]:
-        out = []
-        if len(strings_to_search) < 1:
-            #TODO
-            raise Exception("strings_to_search should contain at least one entry")
-
-        if self.server_config is None:
-            #TODO
-            raise Exception("Something went wrong when reading server config.")
-
-        for line in self.server_config.splitlines():
-            for string in strings_to_search:
-                if line.strip().startswith(string):
-                    out.append(line)
-        return out
-
-
-    def add_entry_to_clients_table(self, client_id: str, client_name: str) -> None:
-
-        filepath = self.controller.working_dir + "/clientsTable"
-        clients_table = json.loads(
-                self.controller.get_text_file_from_container(filepath)
-                )
-        new_client = {
-                "clientId": f"{client_id}",
-                "userData": {
-                    "clientName": f"{client_name}",
-                    "creationDate": f"{utils.get_current_datetime()}"
-                    }
-                }
-        
-        clients_table.append(new_client)
-        clients_table_string = json.dumps(clients_table, indent=4)
-        self.controller.write_string_to_file(filepath, clients_table_string)
+        raise ServerControllerInitializationError(_(
+            f"""Container with name {container_name.value} is not present in a list 
+            of installed containers."""))
 
 
 class ContainerController(Executor):
@@ -176,15 +92,9 @@ class ContainerController(Executor):
     def execute_arbitrary_command_in_container(self, command: str) -> ExecResult:
         result = self.container.exec_run(f"{command}")
         if result[0] != 0:
-            #TODO logging and exception
-            raise Exception(f"""Error in exec_run. Command: '{command}'. Result: {result}.""")
+            raise ExecRunError(_(f"""Error performing exec_run.
+                                 Command: '{command}'. Result: {result}."""))
         return result
-
-
-    def copy_file_into_container(self, from_path: str, to_path: str) -> str:
-        # copy a file from host into container
-        full_command = f"docker cp {from_path} {self.container.id}://{to_path}"
-        return self._execute_shell_command(full_command)
 
 
     def get_text_file_from_container(self, filepath: str) -> str:
@@ -200,57 +110,139 @@ class ContainerController(Executor):
         return result[1]
 
 
-    def update_server_config(self, new_config: str) -> None:
-        #TODO
-        raise Exception("This method should be overriden in the child class.")
+class Configurator:
+    def __init__(self, controller: "XrayContainerController | WgContainerController"):
+        self.controller = controller
+        logger.debug(f"Initialization for container '{controller.container.name}' started...")
+        self.server_public_ip = utils.get_server_public_ip()
+        self.server_config = self.controller.get_server_config()
 
 
-    def get_server_config(self) -> str:
-        #TODO
-        raise Exception("This method should be overriden in the child class.")
+    def create_config(self, client_name: str) -> str:
+        # TODO
+        raise Exception("This method should be overriden by a child class")
+
+    
+    def _read_text_file(self, filepath: str) -> str:
+        with open(filepath, "r") as file:
+            return file.read()
 
 
-    def sync_config(self):
-        pass
+    def _replace_variables_in_config(self, template: str,
+                                     variables_values: dict) -> str:
+        config = template
+
+        for var, value in variables_values.items():
+            if config.find(var) == -1:
+                raise UserConfigError(
+                        f"The variable {var} is not present in the config template.")
+
+            if value is None:
+                raise UserConfigError(f"Value of variable {var} is None.")
+
+            config = config.replace(var, value)
+
+        return config
+
+
+    def _get_lines_from_config(self, strings_to_search: list[str]) -> list[str]:
+        out = []
+        if not strings_to_search:
+            raise ConfigReadingError(_(f"""Attempted to search in server config,
+                    but nothing to search for - strings_to_search is empty."""))
+
+        if self.server_config is None:
+            raise ConfigReadingError(_("""Attempted to search in server config, 
+                           but the server_config property is None."""))
+
+        for line in self.server_config.splitlines():
+            for string in strings_to_search:
+                if line.strip().startswith(string):
+                    out.append(line)
+        return out
+
+
+    def _add_entry_to_clients_table(self, client_id: str, client_name: str) -> None:
+
+        filepath = self.controller.working_dir + "/clientsTable"
+        try:
+            clients_table = json.loads(
+                    self.controller.get_text_file_from_container(filepath)
+                    )
+        except Exception as e:
+            raise ClientsTableError(f"Could not load clientTable.  Details: {e}")
+
+        new_client = {
+                "clientId": f"{client_id}",
+                "userData": {
+                    "clientName": f"{client_name}",
+                    "creationDate": f"{utils.get_current_datetime()}"
+                    }
+                }
+        
+        # assuming that clients_table is always a list. If the file is empty, 
+        # than an exception is thrown when trying to load it.
+        try:
+            clients_table.append(new_client)
+        except AttributeError:
+            raise ClientsTableError("Unexpected format of clientsTable.")
+        
+        try:
+            clients_table_string = json.dumps(clients_table, indent=4)
+        except Exception as e:
+            raise ClientsTableError(_(f"""An error occured when trying to dump 
+                           updated clientsTable to json. Details: {e}"""))
+
+        self.controller.write_string_to_file(filepath, clients_table_string)
+
+
+    def _log_init_complete(self) -> None:
+        logger.debug(_(f"""{self.controller.container.name} 
+                       configurator has been initialized."""))
+
+
+    def _log_server_config_updated(self) -> None:
+        logger.debug(_(f"""Server config for {self.controller.container.name} 
+                       container has been updated."""))
 
 
 class XrayContainerController(ContainerController):
     def __init__(self, container: Container) -> None:
-        self.container = container
+        super().__init__(container)
         self.working_dir = "/opt/amnezia/xray"
 
 
     def get_server_config(self) -> str:
         filepath = f"{self.working_dir}/server.json"
-        return super().get_text_file_from_container(filepath=filepath)
+        return self.get_text_file_from_container(filepath=filepath)
 
 
-    @override
     def update_server_config(self, new_config: str) -> None:
         config_path = f"{self.working_dir}/server.json"
-        super().write_string_to_file(filepath=config_path,
+        self.write_string_to_file(filepath=config_path,
                                    string=new_config)
 
 
     def get_server_public_key(self) -> str:
         filepath = f"{self.working_dir}/xray_public.key"
-        return super().get_text_file_from_container(filepath=filepath)
+        return self.get_text_file_from_container(filepath=filepath)
 
 
     def get_server_short_id_key(self) -> str:
         filepath = f"{self.working_dir}/xray_short_id.key"
-        return super().get_text_file_from_container(filepath=filepath)
+        return self.get_text_file_from_container(filepath=filepath)
 
 
 class XrayConfigurator(Configurator):
 # https://github.com/amnezia-vpn/amnezia-client/blob/dev/client/configurators/xray.cpp
 
     def __init__(self, controller: XrayContainerController):
-        self.controller = controller
-        self.server_config = self.controller.get_server_config()
+        super().__init__(controller)
+        self.controller: XrayContainerController
+
         self.server_public_key = self.controller.get_server_public_key()
-        self.server_public_ip = self.controller.get_server_public_ip()
         self.server_short_id = self.controller.get_server_short_id_key()
+        self._log_init_complete()
 
 
     def _prepare_server_config(self) -> uuid.UUID:
@@ -258,44 +250,17 @@ class XrayConfigurator(Configurator):
         # Generate new UUID for client
         client_id = uuid.uuid1()
 
-        # Validate server config structure
-
-        if self.server_config is None:
-            #TODO
-            raise Exception("Could not read server config.")
-
-        server_config_dict = json.loads(self.server_config)
-
-        inbounds = server_config_dict.get("inbounds")
-
-        # TODO logging and proper exceptions
-        if inbounds is None:
-            print("The 'inbouds' field is missing in the server config.")
-            raise Exception
-
-        if len(inbounds) == 0:
-            print("'inbounds' field is empty.")
-            raise Exception
-        
-        settings = inbounds[0].get("settings")
-
-        if settings is None:
-            print("The 'settings' field is missing in the server inbound config.")
-            raise Exception
-
-        clients = settings.get("clients")
-
-        if clients is None:
-            print("The 'clients' field is missing in the server inbound settings config.")
-            raise Exception
+        server_config_dict = self._validate_server_config()
 
         # Add a new user to the config
         client_config = {"id": str(client_id), "flow": "xtls-rprx-vision"}
-        clients.append(client_config)
-        settings["clients"] = clients
-        inbounds[0]["settings"] = settings
-        server_config_dict["inbounds"] = inbounds
-        new_server_config = json.dumps(server_config_dict, indent=4)
+        server_config_dict["inbounds"][0].get(
+                            "settings").get("clients").append(client_config)
+        try:
+            new_server_config = json.dumps(server_config_dict, indent=4)
+        except Exception as e:
+            raise ServerConfigError(_(f"""Error when trying to json.dumps() an 
+                                      updated server config. Details: {e}"""))
 
         # Load the new config into the container
         self._update_server_config(new_server_config)
@@ -306,6 +271,38 @@ class XrayConfigurator(Configurator):
         return client_id
 
 
+    def _validate_server_config(self) -> dict[str, list]:
+        # Validate server config structure
+        if self.server_config is None:
+            raise ServerConfigError("Could not read server config.")
+
+        server_config_dict = json.loads(self.server_config)
+
+        inbounds = server_config_dict.get("inbounds")
+
+        if inbounds is None:
+            raise ServerConfigError(
+                    "The 'inbouds' field is missing in the server config.")
+
+        if len(inbounds) == 0:
+            raise ServerConfigError("'inbounds' field is empty.")
+        
+        settings = inbounds[0].get("settings")
+
+        if settings is None:
+            raise ServerConfigError(
+                    "The 'settings' field is missing in the server inbound config.")
+
+        clients = settings.get("clients")
+
+        if clients is None:
+            raise ServerConfigError(
+                    "The 'clients' field is missing in the server inbound settings config.")
+
+        return server_config_dict
+
+
+    @override
     def create_config(self, client_name: str) -> str:
         client_id = self._prepare_server_config()
         variables = {
@@ -323,13 +320,15 @@ class XrayConfigurator(Configurator):
 
         # self.add_entry_to_clients_table(client_id=str(client_id),
         #                                 client_name=client_name)
-                
+                    
         return user_config
+            
 
 
     def _update_server_config(self, new_server_config: str) -> None:
         self.controller.update_server_config(new_server_config)
         self.server_config = self.controller.get_server_config()
+        self._log_server_config_updated()
 
     
     def _get_client_config_template(self) -> str:
@@ -358,7 +357,6 @@ class WgContainerController(ContainerController):
         return super().get_text_file_from_container(filepath=filepath)
 
 
-    @override
     def update_server_config(self, new_config: str) -> None:
         config_path = f"{self.working_dir}/wg0.conf"
         super().write_string_to_file(filepath=config_path,
@@ -375,18 +373,21 @@ class WgConfigurator(Configurator):
     # https://github.com/amnezia-vpn/amnezia-client/blob/dev/client/configurators/wireguard_configurator.cpp
 
     def __init__(self, controller: WgContainerController):
-        self.controller        = controller
-        self.server_config     = self.controller.get_server_config()
+        super().__init__(controller)
+        self.controller: WgContainerController
         self.server_public_key = self.controller.get_server_public_key()
         self.server_psk        = self.controller.get_server_preshared_key()
-        self.hostname          = self.controller.get_server_public_ip()
         self.listen_port       = self._get_port_from_server_config()
+        self.dns               = settings.dns
+        self.subnet_part       = self._get_subnet_ip_from_server_config()
+        self._log_init_complete()
 
 
+    @override
     def create_config(self, client_name: str) -> str:
         private_key, public_key, client_ip = self._prepare_wg_config()
         user_config = self._compose_new_user_config(client_ip, private_key)
-        self.add_entry_to_clients_table(client_id=public_key, client_name=client_name)
+        self._add_entry_to_clients_table(client_id=public_key, client_name=client_name)
 
         return user_config
 
@@ -394,28 +395,26 @@ class WgConfigurator(Configurator):
     def _get_port_from_server_config(self) -> int:
         listen_port_line = self._get_lines_from_config(["ListenPort"])
 
-        if listen_port_line is None:
-            #TODO
-            raise Exception
-
-        if listen_port_line[0] is None:
-            raise Exception
+        if not listen_port_line:
+            raise ServerConfigError(_(f"""Listen port not found in the server config. 
+                           Does the config contain 'ListenPort'?"""))
 
         if len(listen_port_line) > 1:
-            raise Exception
+            raise ServerConfigError(_(f"""More than one 'ListenPort' lines 
+                                      found in server config. Expected exactly one."""))
         
         return int(listen_port_line[0].split("=")[1].strip())
 
 
     def _get_subnet_ip_from_server_config(self) -> str:
         address_lines = self._get_lines_from_config(["Address"])
-        if address_lines is None or len(address_lines) < 1:
-            #TODO
-            raise Exception("Could not find server address ip in the server's config file")
+        if not address_lines:
+            raise ServerConfigError(_(f"""Could not find ip in server config. 
+                           Does it contain the 'Address' field?"""))
 
         if address_lines[0].split("/")[-1] != "24":
-            #TODO
-            raise Exception("Server subnet mask is not 24 bit. This API does not support it for now.")
+            raise ServerConfigError(
+            _(f"""Server subnet mask is not 24 bit. This API does not support it for now."""))
 
         server_ip = address_lines[0].split("=")[1].strip().split("/")[0]
 
@@ -426,11 +425,42 @@ class WgConfigurator(Configurator):
         return subnet_part
 
 
+    def _get_existed_client_ips_from_server_config(self) -> list[str]:
+        out = []
+        allowed_ips_lines = self._get_lines_from_config(["AllowedIPs"])
+        if not allowed_ips_lines:
+            return []
+
+        for line in allowed_ips_lines:
+            if line == "":
+                raise ServerConfigError(
+                _(f"""Error while reading allowed ips from server config: 
+                  got an empty line."""))
+
+            ips_string = line.split("=")[1].replace("/32", "")
+            if ips_string is None or ips_string == "":
+                raise ServerConfigError(_(f"""Error while reading allowed ips from 
+                               server config: could not parse AllowedIPs line."""))
+
+            # Get only the first one, in case user configured other AllowedIPs here.
+            ip = ips_string.split(",")[0].strip()
+            if not ip.startswith(self.subnet_part):
+                raise ServerConfigError(
+                _(f"""Error while reading allowed ips from server config:
+                    parsed AllowedIP does not match with server's address.
+                    Parsed ip is '{ip}', while server's subnet is '{self.subnet_part}'."""))
+
+            out.append(ip)
+                
+        return out
+
+
     def _update_server_config(self, new_config: str) -> None:
 
         self.controller.update_server_config(new_config=new_config)
         self.server_config = self.controller.get_server_config()
         self.controller.sync_config()
+        self._log_server_config_updated()
 
 
     def _prepare_wg_config(self) -> tuple[str, str, str]:
@@ -445,14 +475,16 @@ class WgConfigurator(Configurator):
 
     def _calculate_next_vacant_ip(self) -> str:
         taken_ips = self._get_existed_client_ips_from_server_config()
-        if len(taken_ips) == 0:
+        if not taken_ips:
             next_ip_number = 2
         else:
-            assert taken_ips[-1] is not None
+            # Here we asssume that peers in the config stay in the accending order,
+            # and we just take the last one plus one.
+            # This does not feel right. Is this guaranteed by Amnezia client?
+            # Seems so, but it's quite implicit.
             next_ip_number = int(taken_ips[-1].split(".")[-1]) + 1
             if next_ip_number > 254: 
-                #TODO
-                raise Exception("No available IP address left")
+                raise AddressPoolError("No available IP address left")
 
         subnet_part = self._get_subnet_ip_from_server_config()
         return subnet_part + "." + str(next_ip_number)
@@ -460,8 +492,7 @@ class WgConfigurator(Configurator):
 
     def _compose_new_server_config(self, client_pubkey: str, client_ip: str) -> str:
         if self.server_config is None:
-            #TODO
-            raise Exception("Server config is None.")
+            raise ServerConfigError("Server config is None.")
 
         new_server_config = self.server_config + \
                 self._replace_variables_in_config(
@@ -481,42 +512,16 @@ class WgConfigurator(Configurator):
                 template=template,
                 variables_values={
                     "$WIREGUARD_CLIENT_IP": client_ip,
-                    #TODO: do not hard code DNS
-                    "$PRIMARY_DNS": "1.1.1.1",
-                    "$SECONDARY_DNS": "1.0.0.1",
+                    "$PRIMARY_DNS": self.dns[0],
+                    "$SECONDARY_DNS": self.dns[1],
                     "$WIREGUARD_CLIENT_PRIVATE_KEY": private_key,
                     "$WIREGUARD_SERVER_PUBLIC_KEY": self.server_public_key,
                     "$WIREGUARD_PSK": self.server_psk,
-                    "$SERVER_IP_ADDRESS": self.hostname,
+                    "$SERVER_IP_ADDRESS": self.server_public_ip,
                     "$WIREGUARD_SERVER_PORT": str(self.listen_port)
                     }
                 )
         return user_config.strip()
-
-
-    def _get_existed_client_ips_from_server_config(self) -> list[str | None]:
-        out = []
-        allowed_ips_lines = self._get_lines_from_config(["AllowedIPs"])
-        if len(allowed_ips_lines) == 0:
-            return []
-
-        for line in allowed_ips_lines:
-            if line is None:
-                #TODO
-                raise Exception
-
-            ips_string = line.split("=")[1].replace("/32", "")
-            if ips_string is None:
-                #TODO
-                raise Exception
-
-            if ips_string == "":
-                #TODO
-                raise Exception
-            ip = ips_string.split(",")[0].strip()
-            out.append(ip)
-                
-        return out
 
 
 class AmneziaWgContainerController(WgContainerController):
@@ -541,9 +546,8 @@ class AmneziaWgConfigurator(WgConfigurator):
                 template=template,
                 variables_values={
                     "$WIREGUARD_CLIENT_IP": client_ip,
-                    #TODO: do not hard code DNS
-                    "$PRIMARY_DNS": "1.1.1.1",
-                    "$SECONDARY_DNS": "1.0.0.1",
+                    "$PRIMARY_DNS": self.dns[0],
+                    "$SECONDARY_DNS": self.dns[1],
                     "$JUNK_PACKET_COUNT": self.awg_params.get("Jc"),
                     "$JUNK_PACKET_MIN_SIZE": self.awg_params.get("Jmin"),
                     "$JUNK_PACKET_MAX_SIZE": self.awg_params.get("Jmax"),
@@ -556,7 +560,7 @@ class AmneziaWgConfigurator(WgConfigurator):
                     "$WIREGUARD_CLIENT_PRIVATE_KEY": private_key,
                     "$WIREGUARD_SERVER_PUBLIC_KEY": self.server_public_key,
                     "$WIREGUARD_PSK": self.server_psk,
-                    "$SERVER_IP_ADDRESS": self.hostname,
+                    "$SERVER_IP_ADDRESS": self.server_public_ip,
                     "$AWG_SERVER_PORT": str(self.listen_port)
                     }
                 )
@@ -565,29 +569,36 @@ class AmneziaWgConfigurator(WgConfigurator):
 
     def _read_awg_params_from_server_config(self) -> dict[str, str]:
         params = {}
-        strings_to_search = ["Jc", "Jmin", "Jmax", "S1", "S2",
+        lines_to_search = ["Jc", "Jmin", "Jmax", "S1", "S2",
                              "H1", "H2", "H3", "H4"]
 
-        for line in self._get_lines_from_config(strings_to_search):
+        for line in self._get_lines_from_config(lines_to_search):
             key, value = (i.strip() for i in line.split("="))
 
             # check that value is a number. If not, python throw an exception.
-            # TODO do not make it that stupidly
-            int(value)
+            # TODO: do not make it that stupidly
+            # EDIT: maybe it's not so stupid it wrapped with try-except? 
+            try:
+                int(value)
+            except ValueError:
+                raise ServerConfigError(
+                    _(f"""Cound not read awg parameters from the server config.
+                    When reading '{key}', expected an integer, but got '{value}'."""))
 
             params[key] = value
 
-        if len(params) != len(strings_to_search):
-            # TODO
-            raise Exception("Something went wrong when reading awg parameters from server config. Number of parameters does not match.")
+        if len(params) != len(lines_to_search):
+            raise ServerConfigError(
+            _(f"""Something went wrong when reading awg parameters
+            from server config. Number of found parameters does not match 
+            the number of lines to search. Expected {len(lines_to_search)}, 
+            but got {len(params)}: {params}"""))
 
-        for key in strings_to_search:
-            if params[key] == None:
-                # TODO
-                raise Exception(f"Something went wrong when reading awg parameters from server config. Key {key} not found.")
+        for key in lines_to_search:
+            if params.get(key) == None:
+                raise ServerConfigError(
+                _(f"""Something went wrong when reading awg parameters from 
+                server config. Parameter '{key}' not found."""))
 
+        logger.debug("Awg parameters have been read.")
         return params
-        
-
-if __name__ == "__main__":
-    server = ServerController()

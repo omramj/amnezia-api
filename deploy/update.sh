@@ -11,7 +11,7 @@ FULL_LOG="$(mktemp -t amnezia-api_update_logXXXXXXXXXX)"
 LAST_ERROR="$(mktemp -t amnezia-api_update_last_errorXXXXXXXXXX)"
 
 export CONTAINER_NAME="amnezia-api"
-export IMAGE_NAME="omramj/amnezia-api-dev:0.1.1"
+export IMAGE_NAME="omramj/amnezia-api-dev:0.2.0"
 
 
 readonly FULL_LOG LAST_ERROR
@@ -107,6 +107,7 @@ docker_command=(
 
   # Env var for sercet url string
   -e "SECRET_URL_STRING=${SECRET_URL_STRING}"
+  -e "LOGGING_MODE=PROD"
 
   "${IMAGE_NAME}"
 )

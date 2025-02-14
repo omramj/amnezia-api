@@ -128,7 +128,7 @@ function build_amnezia_api() {
 }
 
 function run_amnezia_api() {
-    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock --network container:nginx-${AMNEZIAAPI_IMAGE_NAME} -e SECRET_URL_STRING="dev" --name=${AMNEZIAAPI_IMAGE_NAME} ${AMNEZIAAPI_IMAGE_NAME}
+    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock --network container:nginx-${AMNEZIAAPI_IMAGE_NAME} -e SECRET_URL_STRING="dev" -e LOGGING_MODE="PROD" --name=${AMNEZIAAPI_IMAGE_NAME} ${AMNEZIAAPI_IMAGE_NAME}
     return 
 }
 

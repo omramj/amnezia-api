@@ -74,7 +74,7 @@ class Settings:
                                 "class": "logging.handlers.RotatingFileHandler",
                                 "level": "DEBUG",
                                 "formatter": "with_time",
-                                "filename": "/var/log/amnezia-api/log.txt",
+                                "filename": "log.txt",
                                 "maxBytes": 1000000,
                                 "backupCount": 2,
                                 }

@@ -12,6 +12,7 @@ This is an API backend for AmneziaVPN. It allows you to obtain VPN configs via H
 ### Prerequisites
 
 This project is in its early stage of development, so currenlty the isntallation script has only been tested on Ubuntu Server 24.04 LTS.
+
 Before installing this API, please make sure that you've set up your server and protocols via AmneziaVPN application.
 
 ### How to install
@@ -23,7 +24,17 @@ To install the API, run this command on the server where AmneziaVPN is installed
 sudo bash -c "$(wget -qO- https://raw.githubusercontent.com/omramj/amnezia-api/refs/heads/main/deploy/install.sh)"
 ```
 
-If everything goes fine, you will get an output with URL by witch you can access the API.
+If everything goes fine, you will get an output with URL by which you can access the API:
+
+```
+CONGRATULATIONS! Your Amnezia-API backend is up and running.
+
+To access the api, use the following link:
+
+https://xxx.xxx.xxx.xxx:xxx/xxxxxxxxxxxxxxxx/status
+
+Make sure that port xxxx is open in your firewall.
+```
 
 ### How to update
 
@@ -37,9 +48,7 @@ sudo bash -c "$(wget -qO- https://raw.githubusercontent.com/omramj/amnezia-api/r
 
 As of version 0.2.0, only XRay, AmneziaWG and Wireguard protocols are supported. 
 
-## Basic idea
-
-### URL Structure
+### General idea
 
 The API URL has the following structure:
 
